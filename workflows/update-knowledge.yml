@@ -1,0 +1,67 @@
+# Updates knowledge/ automatically whenever dev or main advances.
+#
+# Loop prevention: commits made by the bot carry [skip ci], which stops this
+# workflow from firing on its own commits.
+name: update-knowledge
+
+on:
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-knowledge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    # Never run on the bot's own commits → prevents infinite loop
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # fetch full history so we can diff against the previous commit
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Determine what changed
+        id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          AFTER="${{ github.sha }}"
+          # Force-pushes / new branches can produce an unknown "before" SHA
+          if ! git cat-file -e "$BEFORE" 2>/dev/null; then
+            BEFORE="${AFTER}^" || BEFORE=""
+          fi
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          echo "after=$AFTER"   >> "$GITHUB_OUTPUT"
+          echo "Changed files since previous commit on ${{ github.ref_name }}:"
+          git diff --name-only "$BEFORE" "$AFTER" || true
+
+      - name: Regenerate knowledge/
+        id: gen
+        env:
+          BEFORE: ${{ steps.diff.outputs.before }}
+          AFTER:  ${{ steps.diff.outputs.after }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          bash scripts/update-knowledge.sh "$BEFORE" "$AFTER" "$BRANCH"
+
+      - name: Commit updated knowledge
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          if git diff --quiet -- knowledge/; then
+            echo "Knowledge unchanged — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "knowledge-bot"
+          git config user.email "knowledge-bot@users.noreply.github.com"
+          git add knowledge/
+          git commit -m "docs(knowledge): update knowledge for $BRANCH [skip ci]"
+          git push origin "$BRANCH"

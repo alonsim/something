@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Local mirror of the CI knowledge update.
+# Fires after "git pull" merged new commits into dev or main.
+# (Canonical updates happen in CI — this only keeps *your* checkout current
+# immediately, before the bot's commit round-trips back.)
+
+after="$(git rev-parse HEAD)"
+
+case "$(git rev-parse --abbrev-ref HEAD)" in
+  dev|main) ;;
+  *) exit 0 ;;
+esac
+
+# ORIG_HEAD points at what HEAD was before the merge/rewind; fall back to the
+# previous commit if it is missing (e.g. fast-forward of a new branch).
+before="$(git rev-parse ORIG_HEAD 2>/dev/null || true)"
+[ -n "$before" ] && git cat-file -e "$before" 2>/dev/null || before="${after}^"
+
+bash "$(git rev-parse --show-toplevel)/scripts/update-knowledge.sh" \
+     "$before" "$after" "$(git rev-parse --abbrev-ref HEAD)"
